@@ -25,8 +25,43 @@ resource "azurerm_public_ip" "main" {
   sku                 = "Standard"
 }
 
+resource "azurerm_lb" "main" {
+  name                = "lb-cwm-vm-scale-test"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+  sku                 = "Standard"
+
+  frontend_ip_configuration {
+    name                 = "frontend"
+    public_ip_address_id = azurerm_public_ip.main.id
+  }
+}
+
+resource "azurerm_lb_backend_address_pool" "main" {
+  name            = "bepool-cwm-vm-scale-test"
+  loadbalancer_id = azurerm_lb.main.id
+}
+
+resource "azurerm_lb_probe" "rdp" {
+  name            = "probe-rdp"
+  loadbalancer_id = azurerm_lb.main.id
+  protocol        = "Tcp"
+  port            = 3389
+}
+
+resource "azurerm_lb_rule" "rdp" {
+  name                           = "rule-rdp"
+  loadbalancer_id                = azurerm_lb.main.id
+  protocol                       = "Tcp"
+  frontend_port                  = 3389
+  backend_port                   = 3389
+  frontend_ip_configuration_name = "frontend"
+  backend_address_pool_ids       = [azurerm_lb_backend_address_pool.main.id]
+  probe_id                       = azurerm_lb_probe.rdp.id
+}
+
 resource "azurerm_network_interface" "vm" {
-  count               = 1
+  count               = 3
   name                = "nic-cwm-vm-scale-test-${count.index}"
   location            = azurerm_resource_group.main.location
   resource_group_name = azurerm_resource_group.main.name
@@ -35,12 +70,18 @@ resource "azurerm_network_interface" "vm" {
     name                          = "internal"
     subnet_id                     = azurerm_subnet.main.id
     private_ip_address_allocation = "Dynamic"
-    public_ip_address_id          = count.index == 0 ? azurerm_public_ip.main.id : null
   }
 }
 
+resource "azurerm_network_interface_backend_address_pool_association" "vm" {
+  count                   = 3
+  network_interface_id    = azurerm_network_interface.vm[count.index].id
+  ip_configuration_name   = "internal"
+  backend_address_pool_id = azurerm_lb_backend_address_pool.main.id
+}
+
 resource "azurerm_windows_virtual_machine" "vm" {
-  count               = 1
+  count               = 3
   name                = "vm-cwm-${count.index}"
   location            = azurerm_resource_group.main.location
   resource_group_name = azurerm_resource_group.main.name
